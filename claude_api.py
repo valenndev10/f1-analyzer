@@ -43,6 +43,23 @@ def build_quali_context(session, gp, anio):
             f" {s1:>7.3f}s {s2:>7.3f}s {s3:>7.3f}s"
         )
 
+    # Velocidades máximas en la vuelta rápida de cada piloto
+    speed_cols = [c for c in ["SpeedI1", "SpeedI2", "SpeedST", "SpeedFL"] if c in laps.columns]
+    if speed_cols:
+        lines.append("\nVELOCIDADES MÁXIMAS (vuelta rápida, km/h):")
+        header = f"  {'Piloto':<6}" + "".join(f" {c:>10}" for c in speed_cols)
+        lines.append(header)
+        for driver in best.index:
+            driver_laps = laps[laps["Driver"] == driver].dropna(subset=["LapTime"])
+            if driver_laps.empty:
+                continue
+            fastest = driver_laps.loc[driver_laps["LapTime"].idxmin()]
+            vals = "".join(
+                f" {fastest[c]:>9.1f}" if pd.notna(fastest.get(c)) else f" {'N/A':>9}"
+                for c in speed_cols
+            )
+            lines.append(f"  {driver:<6}{vals}")
+
     return "\n".join(lines)
 
 
@@ -79,17 +96,29 @@ def build_race_context(session, gp, anio):
         )
         lines.append(f"  {driver}: {strategy}")
 
-    # Ritmo medio por piloto (median LapTime)
-    lines.append("\nRITMO MEDIO EN CARRERA (mediana, sin inlaps/outlaps):")
-    pace = (
-        laps[laps["IsPersonalBest"] == False]
-        .groupby("Driver")["LapTime"]
-        .median()
-        .dropna()
-        .sort_values()
-    )
-    for driver, t in pace.items():
-        lines.append(f"  {driver}: {_format_time(t)}")
+    # Ritmo por stint (mediana, excluyendo entrada/salida de pit)
+    lines.append("\nRITMO POR STINT (mediana de vueltas limpias):")
+    try:
+        clean = laps.dropna(subset=["LapTime", "Stint", "Compound"])
+        clean = clean[clean["PitInTime"].isna() & clean["PitOutTime"].isna()].copy()
+        clean["LapTimeSec"] = clean["LapTime"].dt.total_seconds()
+
+        for driver in final_pos.index:
+            d_laps = clean[clean["Driver"] == driver]
+            if d_laps.empty:
+                continue
+            stints = d_laps.groupby("Stint").agg(
+                compound=("Compound", "first"),
+                pace=("LapTimeSec", "median"),
+                n=("LapTimeSec", "count"),
+            )
+            stint_str = "  ".join(
+                f"{row['compound']}({row['n']}v)={row['pace']:.2f}s"
+                for _, row in stints.iterrows()
+            )
+            lines.append(f"  {driver}: {stint_str}")
+    except Exception:
+        pass
 
     return "\n".join(lines)
 
