@@ -263,3 +263,141 @@ def grafica_degradacion(session, pilotos):
 
     plt.tight_layout()
     return fig
+
+
+# ── DASHBOARD DE TEMPORADA ────────────────────────────────────────────────────
+
+def grafica_posiciones_temporada(df, piloto, anio):
+    """Posición final en cada GP de la temporada."""
+    fig, ax = plt.subplots(figsize=(14, 5))
+    fig.patch.set_facecolor('#1a1a2e')
+    ax.set_facecolor('#1a1a2e')
+
+    gps = df["GP"].tolist()
+    posiciones = df["posicion"].tolist()
+
+    colores = []
+    for pos, status in zip(df["posicion"], df["status"]):
+        if pos is None or "DNF" in str(status) or "Retired" in str(status):
+            colores.append("#e74c3c")
+        elif pos <= 3:
+            colores.append("#f1c40f")
+        elif pos <= 10:
+            colores.append("#3498db")
+        else:
+            colores.append("#7f8c8d")
+
+    bars = ax.bar(range(len(gps)), posiciones, color=colores, edgecolor="#222", linewidth=0.5)
+
+    for i, (bar, pos) in enumerate(zip(bars, posiciones)):
+        if pos is not None:
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.2,
+                    f"P{pos}", ha="center", va="bottom", fontsize=8, color="white")
+
+    for i, grid in enumerate(df["grid"]):
+        if grid is not None:
+            ax.plot(i, grid, "D", color="white", markersize=5, zorder=5, alpha=0.7)
+
+    ax.set_xticks(range(len(gps)))
+    ax.set_xticklabels(
+        [g.replace(" Grand Prix", "").replace(" ", "\n") for g in gps],
+        fontsize=7, color="white", rotation=0
+    )
+    ax.invert_yaxis()
+    ax.set_ylim(21, 0)
+    ax.set_yticks(range(1, 21))
+    ax.set_yticklabels([f"P{i}" for i in range(1, 21)], fontsize=7, color="white")
+    ax.set_title(f"{piloto} — Posiciones {anio}  (◆ = salida)", fontsize=13, fontweight="bold", color="white")
+    ax.tick_params(colors="white")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#444")
+    ax.spines["bottom"].set_color("#444")
+
+    legend = [
+        Patch(facecolor="#f1c40f", label="Podio"),
+        Patch(facecolor="#3498db", label="Puntos"),
+        Patch(facecolor="#7f8c8d", label="Fuera de puntos"),
+        Patch(facecolor="#e74c3c", label="DNF"),
+        Line2D([0], [0], marker="D", color="white", linestyle="None", label="Salida"),
+    ]
+    ax.legend(handles=legend, loc="lower right", facecolor="#1a1a2e", labelcolor="white", fontsize=8)
+
+    plt.tight_layout()
+    return fig
+
+
+def grafica_puntos_temporada(df, piloto, anio):
+    """Puntos acumulados a lo largo de la temporada."""
+    fig, ax = plt.subplots(figsize=(14, 4))
+    fig.patch.set_facecolor('#1a1a2e')
+    ax.set_facecolor('#1a1a2e')
+
+    x = range(len(df))
+    ax.fill_between(x, df["puntos_acum"], alpha=0.3, color="#e74c3c")
+    ax.plot(x, df["puntos_acum"], color="#e74c3c", linewidth=2)
+    ax.scatter(x, df["puntos_acum"], color="white", s=30, zorder=5)
+
+    total = df["puntos_acum"].iloc[-1] if not df.empty else 0
+    ax.set_title(
+        f"{piloto} — Puntos acumulados {anio}  (Total: {total:.0f} pts)",
+        fontsize=13, fontweight="bold", color="white"
+    )
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(
+        [g.replace(" Grand Prix", "").replace(" ", "\n") for g in df["GP"]],
+        fontsize=7, color="white"
+    )
+    ax.tick_params(colors="white")
+    ax.set_ylabel("Puntos", color="white")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#444")
+    ax.spines["bottom"].set_color("#444")
+
+    plt.tight_layout()
+    return fig
+
+
+def grafica_grid_vs_carrera(df, piloto, anio):
+    """Scatter: posición de salida vs posición final."""
+    import matplotlib.cm as cm
+    fig, ax = plt.subplots(figsize=(7, 7))
+    fig.patch.set_facecolor('#1a1a2e')
+    ax.set_facecolor('#1a1a2e')
+
+    valid = df.dropna(subset=["grid", "posicion"])
+    ax.plot([1, 20], [1, 20], "--", color="#555", linewidth=1)
+
+    sc = ax.scatter(
+        valid["grid"], valid["posicion"],
+        c=valid["puntos"], cmap="RdYlGn", s=80,
+        edgecolors="white", linewidths=0.5, zorder=5,
+        vmin=0, vmax=25,
+    )
+
+    for _, row in valid.iterrows():
+        label = row["GP"].replace(" Grand Prix", "")
+        ax.annotate(label, (row["grid"], row["posicion"]),
+                    textcoords="offset points", xytext=(5, 3),
+                    fontsize=6, color="white", alpha=0.8)
+
+    cbar = plt.colorbar(sc, ax=ax)
+    cbar.set_label("Puntos", color="white")
+    cbar.ax.yaxis.set_tick_params(color="white")
+    plt.setp(cbar.ax.yaxis.get_ticklabels(), color="white")
+
+    ax.set_xlim(0, 21)
+    ax.set_ylim(21, 0)
+    ax.set_xlabel("Posición de salida (grid)", color="white")
+    ax.set_ylabel("Posición final", color="white")
+    ax.set_title(f"{piloto} — Grid vs Carrera {anio}", fontsize=13, fontweight="bold", color="white")
+    ax.tick_params(colors="white")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#444")
+    ax.spines["bottom"].set_color("#444")
+
+    plt.tight_layout()
+    return fig
+
