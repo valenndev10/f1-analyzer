@@ -4,6 +4,7 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 from data import cargar_sesion
+from data_temporada import get_pilotos_temporada, cargar_temporada
 from claude_api import build_quali_context, build_race_context, query_claude
 from visualizaciones import (
     grafica_clasificacion,
@@ -13,6 +14,9 @@ from visualizaciones import (
     grafica_posicion,
     grafica_estrategia,
     grafica_degradacion,
+    grafica_posiciones_temporada,
+    grafica_puntos_temporada,
+    grafica_grid_vs_carrera,
 )
 
 # ── Configuración de página ───────────────────────────────────────────────────
@@ -94,11 +98,12 @@ with st.sidebar:
 
 # ── Pestañas ──────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🏁 Clasificación",
     "📡 Telemetría",
     "🏆 Carrera",
     "🔧 Estrategia",
+    "👤 Temporada",
     "💬 Chat IA",
 ])
 
@@ -207,9 +212,81 @@ with tab4:
     except Exception as e:
         st.error(f"Error cargando estrategia: {e}")
 
-# ── TAB 5: Chat IA ────────────────────────────────────────────────────────────
+# ── TAB 5: Temporada ──────────────────────────────────────────────────────────
 
 with tab5:
+    st.subheader(f"👤 Dashboard de piloto — {anio}")
+
+    @st.cache_data(show_spinner="Cargando lista de pilotos...")
+    def get_drivers_season(anio):
+        return get_pilotos_temporada(anio)
+
+    @st.cache_data(show_spinner="Cargando resultados de la temporada... (puede tardar la primera vez)")
+    def get_season_data(anio, piloto):
+        return cargar_temporada(anio, piloto)
+
+    @st.cache_data(show_spinner="Generando gráfica de posiciones...")
+    def cached_posiciones_temp(anio, piloto):
+        df = get_season_data(anio, piloto)
+        return _fig_to_bytes(grafica_posiciones_temporada(df, piloto, anio))
+
+    @st.cache_data(show_spinner="Generando gráfica de puntos...")
+    def cached_puntos_temp(anio, piloto):
+        df = get_season_data(anio, piloto)
+        return _fig_to_bytes(grafica_puntos_temporada(df, piloto, anio))
+
+    @st.cache_data(show_spinner="Generando grid vs carrera...")
+    def cached_grid_vs_carrera(anio, piloto):
+        df = get_season_data(anio, piloto)
+        return _fig_to_bytes(grafica_grid_vs_carrera(df, piloto, anio))
+
+    try:
+        drivers_season = get_drivers_season(anio)
+        piloto_dash = st.selectbox("Piloto", drivers_season, key="dash_piloto")
+
+        df_temp = get_season_data(anio, piloto_dash)
+
+        if df_temp.empty:
+            st.warning("No hay datos disponibles para este piloto en esta temporada.")
+        else:
+            # Métricas resumen
+            total_pts   = df_temp["puntos_acum"].iloc[-1]
+            podios      = (df_temp["posicion"] <= 3).sum()
+            victorias   = (df_temp["posicion"] == 1).sum()
+            dnfs        = df_temp["status"].str.contains("DNF|Retired", na=False).sum()
+            carreras    = len(df_temp)
+
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("Carreras", carreras)
+            c2.metric("Victorias", int(victorias))
+            c3.metric("Podios", int(podios))
+            c4.metric("Puntos", f"{total_pts:.0f}")
+            c5.metric("DNFs", int(dnfs))
+
+            st.markdown("#### Posición por carrera")
+            st.image(cached_posiciones_temp(anio, piloto_dash), use_container_width=True)
+
+            st.markdown("#### Puntos acumulados")
+            st.image(cached_puntos_temp(anio, piloto_dash), use_container_width=True)
+
+            st.markdown("#### Grid vs resultado final")
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                st.image(cached_grid_vs_carrera(anio, piloto_dash), use_container_width=True)
+            with col2:
+                st.dataframe(
+                    df_temp[["GP", "grid", "posicion", "puntos", "status"]]
+                    .rename(columns={"GP": "Gran Premio", "grid": "Salida",
+                                     "posicion": "Llegada", "puntos": "Pts", "status": "Estado"}),
+                    use_container_width=True, hide_index=True,
+                )
+
+    except Exception as e:
+        st.error(f"Error cargando temporada: {e}")
+
+# ── TAB 6: Chat IA ────────────────────────────────────────────────────────────
+
+with tab6:
     st.subheader(f"💬 Analista IA — {gp} {anio}")
     st.caption("Pregunta en lenguaje natural sobre los datos de esta sesión.")
 
