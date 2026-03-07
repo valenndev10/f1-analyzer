@@ -265,6 +265,175 @@ def grafica_degradacion(session, pilotos):
     return fig
 
 
+# ── ANÁLISIS DE FRENADA Y TRAZADA ────────────────────────────────────────────
+
+def _extraer_datos_curvas(tel, corners):
+    """Para cada curva: velocidad mínima y distancia de frenada."""
+    resultados = []
+    for _, corner in corners.iterrows():
+        dist_corner = corner['Distance']
+        label = f"T{int(corner['Number'])}"
+
+        # Velocidad mínima en ventana ±75 m alrededor de la curva
+        mask_vel = (
+            (tel['Distance'] >= dist_corner - 75) &
+            (tel['Distance'] <= dist_corner + 75)
+        )
+        seg_vel = tel[mask_vel]
+        min_speed = float(seg_vel['Speed'].min()) if not seg_vel.empty else None
+
+        # Primer frenazo en los 300 m previos a la curva
+        mask_brake = (
+            (tel['Distance'] >= dist_corner - 300) &
+            (tel['Distance'] < dist_corner)
+        )
+        seg_brake = tel[mask_brake]
+        brake_dist = 0.0
+        if not seg_brake.empty:
+            braking = seg_brake[seg_brake['Brake'].astype(bool)]
+            if not braking.empty:
+                brake_dist = float(dist_corner - braking.iloc[0]['Distance'])
+
+        resultados.append({'curva': label, 'min_speed': min_speed, 'brake_dist': brake_dist})
+    return resultados
+
+
+def grafica_mapa_frenada(session, piloto1, piloto2):
+    """Circuito coloreado por zonas de freno para dos pilotos."""
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    fig.patch.set_facecolor('#1a1a2e')
+
+    for ax, piloto in zip(axes, [piloto1, piloto2]):
+        vuelta = session.laps.pick_driver(piloto).pick_fastest()
+        tel = vuelta.get_telemetry().add_distance()
+
+        x = tel['X'].values
+        y = tel['Y'].values
+        brake = tel['Brake'].values.astype(bool)
+
+        # Fondo del circuito
+        ax.plot(x, y, color='#333333', linewidth=5, zorder=1)
+
+        # Segmentos coloreados: rojo=frenando, verde=acelerando
+        points = np.array([x, y]).T.reshape(-1, 1, 2)
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+        colors = ['#ff3333' if b else '#00cc66' for b in brake[:-1]]
+        lc = LineCollection(segments, colors=colors, linewidth=3, zorder=2)
+        ax.add_collection(lc)
+
+        ax.autoscale()
+        ax.set_aspect('equal')
+        ax.axis('off')
+        ax.set_facecolor('#1a1a2e')
+        color_piloto = get_team_color(session, piloto)
+        ax.set_title(piloto, color=color_piloto, fontsize=13, fontweight='bold')
+
+    legend_elems = [
+        Patch(facecolor='#ff3333', label='Frenando'),
+        Patch(facecolor='#00cc66', label='Sin frenar'),
+    ]
+    fig.legend(handles=legend_elems, loc='lower center', ncol=2,
+               facecolor='#1a1a2e', labelcolor='white', fontsize=10)
+    fig.suptitle('Zonas de frenada', fontsize=14, fontweight='bold', color='white')
+    plt.tight_layout(rect=[0, 0.06, 1, 1])
+    return fig
+
+
+def grafica_velocidad_curvas(session, piloto1, piloto2):
+    """Velocidad mínima por curva comparando dos pilotos."""
+    circuit_info = session.get_circuit_info()
+    corners = circuit_info.corners
+
+    v1 = session.laps.pick_driver(piloto1).pick_fastest().get_telemetry().add_distance()
+    v2 = session.laps.pick_driver(piloto2).pick_fastest().get_telemetry().add_distance()
+
+    datos1 = _extraer_datos_curvas(v1, corners)
+    datos2 = _extraer_datos_curvas(v2, corners)
+
+    curvas = [d['curva'] for d in datos1]
+    speeds1 = [d['min_speed'] or 0 for d in datos1]
+    speeds2 = [d['min_speed'] or 0 for d in datos2]
+
+    color1 = get_team_color(session, piloto1)
+    color2 = get_team_color(session, piloto2)
+
+    x = np.arange(len(curvas))
+    width = 0.38
+
+    fig, ax = plt.subplots(figsize=(max(12, len(curvas) * 0.7), 6))
+    fig.patch.set_facecolor('#1a1a2e')
+    ax.set_facecolor('#1a1a2e')
+
+    bars1 = ax.bar(x - width / 2, speeds1, width, color=color1, label=piloto1)
+    bars2 = ax.bar(x + width / 2, speeds2, width, color=color2, label=piloto2)
+
+    # Marcar al más rápido en cada curva
+    for i, (s1, s2) in enumerate(zip(speeds1, speeds2)):
+        winner = bars1[i] if s1 > s2 else bars2[i]
+        ax.text(winner.get_x() + winner.get_width() / 2,
+                winner.get_height() + 1, '★',
+                ha='center', va='bottom', fontsize=8, color='gold')
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(curvas, fontsize=8, color='white', rotation=45, ha='right')
+    ax.set_ylabel('Velocidad mínima (km/h)', color='white')
+    ax.set_title('Velocidad mínima por curva', fontsize=14, fontweight='bold', color='white')
+    ax.tick_params(colors='white')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('#444')
+    ax.spines['bottom'].set_color('#444')
+    ax.legend(facecolor='#1a1a2e', labelcolor='white')
+    plt.tight_layout()
+    return fig
+
+
+def grafica_punto_frenada(session, piloto1, piloto2):
+    """Distancia de frenada antes de cada curva para dos pilotos."""
+    circuit_info = session.get_circuit_info()
+    corners = circuit_info.corners
+
+    v1 = session.laps.pick_driver(piloto1).pick_fastest().get_telemetry().add_distance()
+    v2 = session.laps.pick_driver(piloto2).pick_fastest().get_telemetry().add_distance()
+
+    datos1 = _extraer_datos_curvas(v1, corners)
+    datos2 = _extraer_datos_curvas(v2, corners)
+
+    # Filtrar solo curvas con datos de frenada en ambos
+    curvas, bd1, bd2 = [], [], []
+    for d1, d2 in zip(datos1, datos2):
+        if d1['brake_dist'] > 0 or d2['brake_dist'] > 0:
+            curvas.append(d1['curva'])
+            bd1.append(d1['brake_dist'])
+            bd2.append(d2['brake_dist'])
+
+    color1 = get_team_color(session, piloto1)
+    color2 = get_team_color(session, piloto2)
+
+    y = np.arange(len(curvas))
+    height = 0.38
+
+    fig, ax = plt.subplots(figsize=(10, max(6, len(curvas) * 0.45)))
+    fig.patch.set_facecolor('#1a1a2e')
+    ax.set_facecolor('#1a1a2e')
+
+    ax.barh(y + height / 2, bd1, height, color=color1, label=piloto1)
+    ax.barh(y - height / 2, bd2, height, color=color2, label=piloto2)
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(curvas, fontsize=9, color='white')
+    ax.set_xlabel('Distancia de frenada antes de la curva (m)', color='white')
+    ax.set_title('Punto de frenada por curva', fontsize=14, fontweight='bold', color='white')
+    ax.tick_params(colors='white')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('#444')
+    ax.spines['bottom'].set_color('#444')
+    ax.legend(facecolor='#1a1a2e', labelcolor='white')
+    plt.tight_layout()
+    return fig
+
+
 # ── DASHBOARD DE TEMPORADA ────────────────────────────────────────────────────
 
 def grafica_posiciones_temporada(df, piloto, anio):
@@ -400,4 +569,3 @@ def grafica_grid_vs_carrera(df, piloto, anio):
 
     plt.tight_layout()
     return fig
-
