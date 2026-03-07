@@ -14,6 +14,9 @@ from visualizaciones import (
     grafica_posicion,
     grafica_estrategia,
     grafica_degradacion,
+    grafica_mapa_frenada,
+    grafica_velocidad_curvas,
+    grafica_punto_frenada,
     grafica_posiciones_temporada,
     grafica_puntos_temporada,
     grafica_grid_vs_carrera,
@@ -88,6 +91,18 @@ def cached_estrategia(anio, gp):
 def cached_degradacion(anio, gp, pilotos):
     return _fig_to_bytes(grafica_degradacion(get_session(anio, gp, "R"), list(pilotos)))
 
+@st.cache_data(show_spinner="Generando mapa de frenada...")
+def cached_mapa_frenada(anio, gp, tipo, p1, p2):
+    return _fig_to_bytes(grafica_mapa_frenada(get_session(anio, gp, tipo), p1, p2))
+
+@st.cache_data(show_spinner="Calculando velocidad por curva...")
+def cached_velocidad_curvas(anio, gp, tipo, p1, p2):
+    return _fig_to_bytes(grafica_velocidad_curvas(get_session(anio, gp, tipo), p1, p2))
+
+@st.cache_data(show_spinner="Calculando puntos de frenada...")
+def cached_punto_frenada(anio, gp, tipo, p1, p2):
+    return _fig_to_bytes(grafica_punto_frenada(get_session(anio, gp, tipo), p1, p2))
+
 # ── Selector global en sidebar ────────────────────────────────────────────────
 
 with st.sidebar:
@@ -98,11 +113,12 @@ with st.sidebar:
 
 # ── Pestañas ──────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "🏁 Clasificación",
     "📡 Telemetría",
     "🏆 Carrera",
     "🔧 Estrategia",
+    "⚙️ Curvas",
     "👤 Temporada",
     "💬 Chat IA",
 ])
@@ -212,9 +228,46 @@ with tab4:
     except Exception as e:
         st.error(f"Error cargando estrategia: {e}")
 
-# ── TAB 5: Temporada ──────────────────────────────────────────────────────────
+# ── TAB 5: Curvas ─────────────────────────────────────────────────────────────
 
 with tab5:
+    st.subheader(f"Análisis de frenada y trazada — {gp} {anio}")
+
+    sesion_curvas = st.radio(
+        "Sesión", ["Clasificación (Q)", "Carrera (R)"], horizontal=True, key="curvas_sesion"
+    )
+    tipo_curvas = "Q" if sesion_curvas == "Clasificación (Q)" else "R"
+
+    try:
+        session_curvas = get_session(anio, gp, tipo_curvas)
+        drivers_curvas = session_curvas.laps["Driver"].unique().tolist()
+
+        col1, col2 = st.columns(2)
+        with col1:
+            pc1 = st.selectbox("Piloto 1", drivers_curvas, index=0, key="curvas_p1")
+        with col2:
+            pc2 = st.selectbox("Piloto 2", drivers_curvas, index=1, key="curvas_p2")
+
+        if pc1 == pc2:
+            st.warning("Selecciona dos pilotos diferentes.")
+        else:
+            st.markdown("#### Zonas de frenada")
+            st.image(cached_mapa_frenada(anio, gp, tipo_curvas, pc1, pc2), use_container_width=True)
+
+            st.markdown("#### Velocidad mínima por curva")
+            st.image(cached_velocidad_curvas(anio, gp, tipo_curvas, pc1, pc2), use_container_width=True)
+
+            st.markdown("#### Punto de frenada por curva")
+            st.caption("Metros antes de la curva en los que el piloto empieza a frenar.")
+            st.image(cached_punto_frenada(anio, gp, tipo_curvas, pc1, pc2), use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Error cargando análisis de curvas: {e}")
+
+
+# ── TAB 6: Temporada ──────────────────────────────────────────────────────────
+
+with tab6:
     st.subheader(f"👤 Dashboard de piloto — {anio}")
 
     @st.cache_data(show_spinner="Cargando lista de pilotos...")
@@ -284,9 +337,9 @@ with tab5:
     except Exception as e:
         st.error(f"Error cargando temporada: {e}")
 
-# ── TAB 6: Chat IA ────────────────────────────────────────────────────────────
+# ── TAB 7: Chat IA ────────────────────────────────────────────────────────────
 
-with tab6:
+with tab7:
     st.subheader(f"💬 Analista IA — {gp} {anio}")
     st.caption("Pregunta en lenguaje natural sobre los datos de esta sesión.")
 
